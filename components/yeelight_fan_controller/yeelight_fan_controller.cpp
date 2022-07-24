@@ -116,7 +116,6 @@ void YeelightFanController::dump_config() {  // NOLINT(google-readability-functi
 
 float YeelightFanController::get_setup_priority() const {
   // After UART bus
-  ESP_LOGI(TAG, "UART BUS -> %f", setup_priority::BUS - 1.0f);
   return setup_priority::BUS - 1.0f;
 }
 
@@ -140,6 +139,7 @@ void YeelightFanController::send_command(uint8_t function, uint8_t value) {
   frame[3] = frame[1] + frame[2] + frame[4];
 
   ESP_LOGI(TAG, "TX -> %s", format_hex_pretty(frame, 6).c_str());
+  ESP_LOGI(TAG, "UART BUS -> %f", setup_priority::BUS - 1.0f);
   this->write_array(frame, 6);
   this->flush();
 }
