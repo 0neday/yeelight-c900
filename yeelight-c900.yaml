@@ -17,7 +17,7 @@ esp32:
       
 # Enable logging
 logger:
-#  level: VERY_VERBOSE
+#  level: debug
 
 web_server:
  port: 80
@@ -53,11 +53,6 @@ globals:
    - id: update_step
      type: float
      initial_value: '0.15'
-     
-   - id: fan_running
-     type: int
-     initial_value: '0'
-     restore_value: yes
      
    - id: fan_speed_loop_flag
      type: int
@@ -99,10 +94,6 @@ fan:
   - platform: yeelight_fan_controller
     id: yeelight_ceiling_fan
     name: "yeelight ceiling fan"
-    on_turn_on: 
-      - lambda: "id(fan_running) = 1;"
-    on_turn_off:
-      - lambda: "id(fan_running) = 0;"
      
 uart:
   id: fan_driver_uart
@@ -142,18 +133,13 @@ sensor:
     id: fan_speed_level
     accuracy_decimals: 0
     update_interval: 300s
-    internal: true
+    internal: false
 
   - platform: template
     lambda: return temperatureRead();
     name: "yeelight c900 temperature"
     unit_of_measurement: "°C"
     update_interval: 300s
-
-binary_sensor:
-  - platform: template
-    name: "fan running"
-    lambda: "return id(fan_running);"
  
 # BLE, for yeelight remote controller
 esp32_ble_tracker:
@@ -165,102 +151,107 @@ esp32_ble_tracker:
     - mac_address: A4:C1:38:6E:85:0B
       service_uuid: FE95
       then:
-# keycode:  0 - 风扇，1 - 吊顶灯，2 - 风速， 3 - 亮度减， 4 - 夜灯，5 - 亮度加
+      
+# keycode:  0 - 风扇，1 - 吊顶灯/夜灯，2 - 三级调速/无极风速， 3 - 亮度/色温减， 4 - 风扇模式，5 - 亮度/色温加
 # need to check package length == 17 and frame_counter is different
-# 风扇开
+# 长按，x[16] = 2; 短按，x[16] = 0
+
+
          - lambda: |-
               ESP_LOGI("ble_adv", " (length %i) - %s", x.size(), format_hex_pretty(x).c_str());
-            
+
+# 风扇开/关
          - if:
             condition: 
-              lambda: "return(x[14] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_running) == 0);"
+              lambda: "return(x[14] == 0 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
-             - fan.turn_on: yeelight_ceiling_fan
+             - fan.toggle: yeelight_ceiling_fan
              - switch.turn_on: buzzer_beep
 
-# 风扇关
-         - if:
-            condition: 
-              lambda: "return(x[14] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_running) == 1);"
-            then:
-             - lambda: |-
-                 id(frame_counter) = x[4];
-             - switch.turn_on: buzzer_beep
-             - fan.turn_off: yeelight_ceiling_fan
-             - delay: 500ms
 
-# 吊顶灯开关、切换
+# 吊顶灯开/关
          - if:
             condition: 
-              lambda: "return(x[14] == 1 && x.size() == 17 && id(frame_counter) != x[4]);"
+              lambda: "return(x[14] == 1 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
              - switch.turn_on: buzzer_beep
              - light.toggle: ceiling_light
-
-# 三档风速， 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)           
+             
+# 长按，切换为夜灯
          - if:
             condition: 
-              lambda: "return(x[14] == 2 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_running) == 1 && id(fan_speed_loop_flag) == 1);"
+              lambda: "return(x[14] == 1 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
              - switch.turn_on: buzzer_beep
-             - lambda: |- 
-                 uint8_t frame[6] = {0x01, 0x03, 0x01, 0x05, 0x01, 0x03};
-                 ESP_LOGI("remote_controller", "TX -> %s", format_hex_pretty(frame, 6).c_str());
-             - uart.write: 
-                id: fan_driver_uart
-                data: [ 0x01, 0x03, 0x01, 0x05, 0x01, 0x03 ]
-             - delay: 500ms
+             - light.toggle: night_light
+
+# 三档风速， 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)           
+         - if:
+            condition: 
+              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 1);"
+            then:
+             - lambda: |-
+                 id(frame_counter) = x[4];
+             - fan.turn_on: 
+                 id: yeelight_ceiling_fan
+                 speed: 1
+             - switch.turn_on: buzzer_beep
+             - delay: 200ms
              - lambda: |- 
                  id(fan_speed_level).publish_state(1);
                  id(fan_speed_loop_flag) = 2;
              
          - if:
             condition: 
-              lambda: "return(x[14] == 2 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_running) == 1 && id(fan_speed_loop_flag) == 2);"
+              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 2);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
+             - fan.turn_on: 
+                 id: yeelight_ceiling_fan
+                 speed: 50
              - switch.turn_on: buzzer_beep
-             - lambda: |- 
-                 uint8_t frame[6] = {0x01, 0x03, 0x01, 0x36, 0x32, 0x03};
-                 ESP_LOGI("remote_controller", "TX -> %s", format_hex_pretty(frame, 6).c_str());
-             - uart.write: 
-                id: fan_driver_uart
-                data: [ 0x01, 0x03, 0x01, 0x36, 0x32, 0x03 ]
-             - delay: 500ms
+             - delay: 200ms
              - lambda: |- 
                  id(fan_speed_level).publish_state(2);
                  id(fan_speed_loop_flag) = 3;
                  
          - if:
             condition: 
-              lambda: "return(x[14] == 2 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_running) == 1 && id(fan_speed_loop_flag) == 3);"
+              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 3);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
+             - fan.turn_on: 
+                 id: yeelight_ceiling_fan
+                 speed: 100
              - switch.turn_on: buzzer_beep
-             - lambda: |- 
-                 uint8_t frame[6] = {0x01, 0x03, 0x01, 0x68, 0x64, 0x03};
-                 ESP_LOGI("remote_controller", "TX -> %s", format_hex_pretty(frame, 6).c_str());
-             - uart.write: 
-                id: fan_driver_uart
-                data: [ 0x01, 0x03, 0x01, 0x68, 0x64, 0x03 ]
-             - delay: 500ms
+             - delay: 200ms
              - lambda: |- 
                  id(fan_speed_level).publish_state(3);
-                 id(fan_speed_loop_flag) = 1;                 
+                 id(fan_speed_loop_flag) = 1;       
+                 
+# 长按，无极循环调速
+         - if:
+            condition: 
+              lambda: "return(x[14] == 2 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
+            then:
+             - lambda: |-
+                 id(frame_counter) = x[4];
+             - fan.cycle_speed: yeelight_ceiling_fan
+             - switch.turn_on: buzzer_beep
 
 # 吊顶灯亮度减
          - if:
             condition: 
               and:
-                - lambda: "return(x[14] == 3 && x.size() == 17 && id(frame_counter) != x[4]);"
+                - lambda: "return(x[14] == 3 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
                 - light.is_on: ceiling_light
             then:
              - lambda: |-
@@ -285,7 +276,7 @@ esp32_ble_tracker:
          - if:
             condition: 
               and:
-                - lambda: "return(x[14] == 3 && x.size() == 17 && id(frame_counter) != x[4]);"
+                - lambda: "return(x[14] == 3 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
                 - light.is_on: night_light
             then:
              - lambda: |-
@@ -306,21 +297,20 @@ esp32_ble_tracker:
                  call.perform();
              - switch.turn_on: buzzer_beep
              
-# 夜灯开关、切换             
+# 风扇模式切换          
          - if:
             condition: 
-              lambda: "return(x[14] == 4 && x.size() == 17 && id(frame_counter) != x[4]);"
+              lambda: "return(x[14] == 4 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
              - switch.turn_on: buzzer_beep
-             - light.toggle: night_light
 
 # 吊顶灯亮度加
          - if:
             condition: 
               and:
-                - lambda: "return(x[14] == 5 && x.size() == 17 && id(frame_counter) != x[4]);"
+                - lambda: "return(x[14] == 5 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
                 - light.is_on: ceiling_light
             then:
              - lambda: |-
@@ -345,7 +335,7 @@ esp32_ble_tracker:
          - if:
             condition: 
               and:
-                - lambda: "return(x[14] == 5 && x.size() == 17 && id(frame_counter) != x[4]);"
+                - lambda: "return(x[14] == 5 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
                 - light.is_on: night_light
             then:
              - lambda: |-
