@@ -35,7 +35,7 @@ void YeelightFan::control(const fan::FanCall &call) {
     this->speed = *call.get_speed();
   if (call.get_direction().has_value())
     this->direction = *call.get_direction();
-
+  get_current_speed(this->speed);
   this->write_state_();
   this->publish_state();
 }
@@ -56,6 +56,8 @@ void YeelightFan::write_state_() {
   }
 
 }
+
+uint8_t get_current_speed(uint8_t speed){ return speed;}
 
 }  // namespace yeelight_fan_controller
 }  // namespace esphome
