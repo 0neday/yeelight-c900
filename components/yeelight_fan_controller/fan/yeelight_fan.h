@@ -13,7 +13,7 @@ class YeelightFan : public fan::Fan, public Component {
   void setup() override;
   void dump_config() override;
   fan::FanTraits get_traits() override;
-  uint8_t get_current_speed(uint8_t speed);
+  uint8_t get_current_speed();
 
  protected:
   void control(const fan::FanCall &call) override;
