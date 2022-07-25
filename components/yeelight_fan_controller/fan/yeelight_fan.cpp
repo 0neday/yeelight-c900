@@ -56,7 +56,7 @@ void YeelightFan::write_state_() {
 
 }
 
-uint8_t get_current_speed(){ return this->speed;}
+uint8_t YeelightFan::get_current_speed(){ return this->speed;}
 
 }  // namespace yeelight_fan_controller
 }  // namespace esphome
