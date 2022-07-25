@@ -10,7 +10,7 @@ esphome:
 
 # turn on light when boot        
 #  on_boot: 
-#    - light.turn_on: ceiling_light
+#   - light.turn_on: ceiling_light
 
 esp32:
  board: esp32dev
@@ -58,7 +58,7 @@ globals:
      type: int
      initial_value: '1'
      restore_value: yes
-
+     
 output:
   - platform: ledc
     pin: GPIO19
@@ -94,6 +94,8 @@ fan:
   - platform: yeelight_fan_controller
     id: yeelight_ceiling_fan
     name: "yeelight ceiling fan"
+    on_speed_set:
+      - lambda: "id(fan_speed).publish_state(id(yeelight_ceiling_fan).speed);"
      
 uart:
   id: fan_driver_uart
@@ -129,11 +131,11 @@ light:
 
 sensor:
   - platform: template
-    name: "fan speed level"
-    id: fan_speed_level
+    name: "fan speed"
+    id: fan_speed
     accuracy_decimals: 0
     update_interval: 300s
-    internal: true
+    internal: false
 
   - platform: template
     lambda: return temperatureRead();
@@ -191,49 +193,24 @@ esp32_ble_tracker:
 # 三档风速， 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)           
          - if:
             condition: 
-              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 1);"
+              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
              - lambda: |-
                  id(frame_counter) = x[4];
              - fan.turn_on: 
-                 id: yeelight_ceiling_fan
-                 speed: 1
+                id: yeelight_ceiling_fan
+                speed: !lambda |-
+                  float speed;
+                  speed = id(fan_speed_loop_flag) * 50;
+                  id(fan_speed_loop_flag) += 1;
+                  if(id(fan_speed_loop_flag) > 2){
+                      id(fan_speed_loop_flag) = 0;
+                  }
+                  if( speed <= 100 && speed > 1)
+                      return speed;
+                  else 
+                      return 1;
              - switch.turn_on: buzzer_beep
-             - delay: 200ms
-             - lambda: |- 
-                 id(fan_speed_level).publish_state(1);
-                 id(fan_speed_loop_flag) = 2;
-             
-         - if:
-            condition: 
-              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 2);"
-            then:
-             - lambda: |-
-                 id(frame_counter) = x[4];
-             - fan.turn_on: 
-                 id: yeelight_ceiling_fan
-                 speed: 50
-             - switch.turn_on: buzzer_beep
-             - delay: 200ms
-             - lambda: |- 
-                 id(fan_speed_level).publish_state(2);
-                 id(fan_speed_loop_flag) = 3;
-                 
-         - if:
-            condition: 
-              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4] && id(fan_speed_loop_flag) == 3);"
-            then:
-             - lambda: |-
-                 id(frame_counter) = x[4];
-             - fan.turn_on: 
-                 id: yeelight_ceiling_fan
-                 speed: 100
-             - switch.turn_on: buzzer_beep
-             - delay: 200ms
-             - lambda: |- 
-                 id(fan_speed_level).publish_state(3);
-                 id(fan_speed_loop_flag) = 1;       
-                 
 # 长按，无极循环调速
          - if:
             condition: 
