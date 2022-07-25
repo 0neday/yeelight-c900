@@ -48,7 +48,7 @@ void YeelightFan::write_state_() {
     else {
       this->parent_->send_command(FUNCTION_SET_MODE, MODE_FORWARD);
     }
-    delay(500);
+    delay(200);
     this->parent_->send_command(FUNCTION_SET_SPEED, this->speed);
   } 
   else {
