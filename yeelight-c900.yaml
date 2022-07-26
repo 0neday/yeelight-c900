@@ -1,4 +1,4 @@
-﻿esphome:
+esphome:
   name: yeelight-c900
   platformio_options:
     platform_packages:
@@ -80,7 +80,7 @@ external_components:
       type: git
       url: https://github.com/0neday/yeelight-c900
       ref: main
-    refresh: 0s
+#     refresh: 0s
     components: yeelight_fan_controller
 
 
@@ -106,7 +106,7 @@ light:
     id: night_light
     output: output_nightlight
     gamma_correct: 0
-    default_transition_length: 500ms
+    default_transition_length: 1000ms
     on_turn_on:
       - light.turn_off: ceiling_light
 
@@ -117,7 +117,7 @@ light:
     warm_white: output_warm
     cold_white_color_temperature: 6500 K
     warm_white_color_temperature: 2700 K
-    default_transition_length: 500ms
+    default_transition_length: 1000ms
     constant_brightness: true
     gamma_correct: 0
     on_turn_on:
@@ -148,11 +148,11 @@ esp32_ble_tracker:
       service_uuid: FE95
       then:
         # keycode:
-        # 0 - fan
+        # 0 - fan or forward mode set
         # 1 - ceiling or night
-        # 2 - three level or stepless
+        # 2 - speed minus or three level speed
         # 3 - brightness or color_temperature minus
-        # 4 - fan mode
+        # 4 - speed plus or reverse mode set
         # 5 - brightness or color_temperature puls
         # need to check package length == 17 and frame_counter is different
         # long press x[16] = 2; short press x[16] = 0
@@ -177,7 +177,7 @@ esp32_ble_tracker:
                   then:
                     - light.toggle: ceiling_light
 
-              # 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)
+              # speed -
               - if:
                   condition:
                     lambda: "return(x[14] == 2);"
@@ -185,25 +185,25 @@ esp32_ble_tracker:
                     - fan.turn_on:
                         id: yeelight_ceiling_fan
                         speed: !lambda |-
-                          float speed;
-                          speed = id(fan_speed_loop_flag) * 50;
-                          id(fan_speed_loop_flag) += 1;
-                          if(id(fan_speed_loop_flag) > 2){
-                              id(fan_speed_loop_flag) = 0;
-                          }
-                          if( speed <= 100 && speed > 1)
+                          float speed = id(yeelight_ceiling_fan).speed - 10;
+                          if( speed <= 100 && speed >= 1)
                               return speed;
                           else
                               return 1;
 
-              # fan mode toggle, standard winds
+              # speed +
               - if:
                   condition:
                     lambda: "return(x[14] == 4);"
                   then:
                     - fan.turn_on:
                         id: yeelight_ceiling_fan
-                        direction: forward
+                        speed: !lambda |-
+                          float speed = id(yeelight_ceiling_fan).speed + 10;
+                          if( speed <= 100 && speed >= 1)
+                              return speed;
+                          else
+                              return 100;
 
               # brightness or color_temperature control(value: 0.01-1f)
               # color_temperature only support for ceiling light
@@ -284,6 +284,15 @@ esp32_ble_tracker:
             condition:
               lambda: "return(x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
+              # fan mode toggle, standard winds
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 0);"
+                  then:
+                    - fan.turn_on:
+                        id: yeelight_ceiling_fan
+                        direction: forward
+
               # toggle night light
               - if:
                   condition:
@@ -291,12 +300,24 @@ esp32_ble_tracker:
                   then:
                     - light.toggle: night_light
 
-              # stepless speed control
+              # 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)
               - if:
                   condition:
                     lambda: "return(x[14] == 2);"
                   then:
-                    - fan.cycle_speed: yeelight_ceiling_fan
+                    - fan.turn_on:
+                        id: yeelight_ceiling_fan
+                        speed: !lambda |-
+                          float speed;
+                          speed = id(fan_speed_loop_flag) * 50;
+                          id(fan_speed_loop_flag) += 1;
+                          if(id(fan_speed_loop_flag) > 2){
+                              id(fan_speed_loop_flag) = 0;
+                          }
+                          if( speed <= 100 && speed >= 1)
+                              return speed;
+                          else
+                              return 1;
 
               # fan mode toggle, cycle winds
               - if:
