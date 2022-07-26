@@ -147,207 +147,203 @@ esp32_ble_tracker:
     - mac_address: A4:C1:38:6E:85:0B
       service_uuid: FE95
       then:
-        # keycode: 0 - fan, 1 - ceiling or night, 2 - three level or stepless,
-        # 3 - brightness or color_temperature minus,
-        # 4 - fan mode,5 - brightness or color_temperature puls
+        # keycode:
+        # 0 - fan
+        # 1 - ceiling or night
+        # 2 - three level or stepless
+        # 3 - brightness or color_temperature minus
+        # 4 - fan mode
+        # 5 - brightness or color_temperature puls
         # need to check package length == 17 and frame_counter is different
         # long press x[16] = 2; short press x[16] = 0
         - lambda: |-
             ESP_LOGI("ble_adv", " (length %i) - %s", x.size(), format_hex_pretty(x).c_str());
-        # fan toggle
+        # short press action
         - if:
             condition:
-              lambda: "return(x[14] == 0 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
+              lambda: "return(x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
+              # toggle fan
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 0);"
+                  then:
+                    - fan.toggle: yeelight_ceiling_fan
+
+              # toggle ceiling
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 1);"
+                  then:
+                    - light.toggle: ceiling_light
+
+              # 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 2);"
+                  then:
+                    - fan.turn_on:
+                        id: yeelight_ceiling_fan
+                        speed: !lambda |-
+                          float speed;
+                          speed = id(fan_speed_loop_flag) * 50;
+                          id(fan_speed_loop_flag) += 1;
+                          if(id(fan_speed_loop_flag) > 2){
+                              id(fan_speed_loop_flag) = 0;
+                          }
+                          if( speed <= 100 && speed > 1)
+                              return speed;
+                          else
+                              return 1;
+
+              # fan mode toggle, standard winds
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 4);"
+                  then:
+                    - fan.turn_on:
+                        id: yeelight_ceiling_fan
+                        direction: forward
+
+              # brightness or color_temperature control(value: 0.01-1f)
+              # color_temperature only support for ceiling light
+              # ceiling brightness -
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 3);"
+                      - light.is_on: ceiling_light
+                  then:
+                    - light.turn_on:
+                        id: ceiling_light
+                        brightness: !lambda |-
+                          float brightness;
+                          brightness = id(ceiling_light).remote_values.get_brightness() - id(update_step);
+                          if( brightness > 0.05f )
+                              return brightness;
+                          else
+                              return 0.05f;
+
+              # ceiling brightness +
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 5);"
+                      - light.is_on: ceiling_light
+                  then:
+                    - light.turn_on:
+                        id: ceiling_light
+                        brightness: !lambda |-
+                          float brightness;
+                          brightness = id(ceiling_light).remote_values.get_brightness() + id(update_step);
+                          if( brightness < 1.0f )
+                              return brightness;
+                          else
+                              return 1.0f;
+
+              # night brightness -
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 3);"
+                      - light.is_on: night_light
+                  then:
+                    - light.turn_on:
+                        id: night_light
+                        brightness: !lambda |-
+                          float brightness;
+                          brightness = id(night_light).remote_values.get_brightness() - id(update_step);
+                          if( brightness > 0.05f )
+                              return brightness;
+                          else
+                              return 0.05f;
+
+              # night brightness +
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 5);"
+                      - light.is_on: night_light
+                  then:
+                    - light.turn_on:
+                        id: night_light
+                        brightness: !lambda |-
+                          float brightness;
+                          brightness = id(night_light).remote_values.get_brightness() + id(update_step);
+                          if( brightness < 1.0f )
+                              return brightness;
+                          else
+                              return 1.0f;
+
+              # for all keycode
               - lambda: "id(frame_counter) = x[4];"
-              - fan.toggle: yeelight_ceiling_fan
               - switch.turn_on: buzzer_beep
 
-        # toggle ceiling
+        # long press action
         - if:
             condition:
-              lambda: "return(x[14] == 1 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
+              lambda: "return(x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
-              - lambda: "id(frame_counter) = x[4];"
-              - switch.turn_on: buzzer_beep
-              - light.toggle: ceiling_light
+              # toggle night light
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 1);"
+                  then:
+                    - light.toggle: night_light
 
-        # long press, toggle night light
-        - if:
-            condition:
-              lambda: "return(x[14] == 1 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - switch.turn_on: buzzer_beep
-              - light.toggle: night_light
+              # stepless speed control
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 2);"
+                  then:
+                    - fan.cycle_speed: yeelight_ceiling_fan
 
-        # 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)
-        - if:
-            condition:
-              lambda: "return(x[14] == 2 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - fan.turn_on:
-                  id: yeelight_ceiling_fan
-                  speed: !lambda |-
-                    float speed;
-                    speed = id(fan_speed_loop_flag) * 50;
-                    id(fan_speed_loop_flag) += 1;
-                    if(id(fan_speed_loop_flag) > 2){
-                        id(fan_speed_loop_flag) = 0;
-                    }
-                    if( speed <= 100 && speed > 1)
-                        return speed;
-                    else
-                        return 1;
-              - switch.turn_on: buzzer_beep
+              # fan mode toggle, cycle winds
+              - if:
+                  condition:
+                    lambda: "return(x[14] == 4);"
+                  then:
+                    - fan.turn_on:
+                        id: yeelight_ceiling_fan
+                        direction: reverse
 
-        # long press, stepless speed control
-        - if:
-            condition:
-              lambda: "return(x[14] == 2 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - fan.cycle_speed: yeelight_ceiling_fan
-              - switch.turn_on: buzzer_beep
+              # only support by ceiling light, +- update_step
+              # ceiling color_temperature  -
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 3);"
+                      - light.is_on: ceiling_light
+                  then:
+                    - light.turn_on:
+                        id: ceiling_light
+                        color_mode: COLD_WARM_WHITE
+                        color_temperature: !lambda |-
+                          float color_temperature;
+                          color_temperature = id(ceiling_light).remote_values.get_color_temperature() * (1 + id(update_step));
+                          if(color_temperature < 370.0f)
+                            return color_temperature;
+                          else
+                            return 370;
 
-        # fan mode toggle, standard winds
-        - if:
-            condition:
-              lambda: "return(x[14] == 4 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - fan.turn_on:
-                  id: yeelight_ceiling_fan
-                  direction: forward
-              - switch.turn_on: buzzer_beep
+              # ceiling color_temperature +
+              - if:
+                  condition:
+                    and:
+                      - lambda: "return(x[14] == 5);"
+                      - light.is_on: ceiling_light
+                  then:
+                    - light.turn_on:
+                        id: ceiling_light
+                        color_mode: COLD_WARM_WHITE
+                        color_temperature: !lambda |-
+                          float color_temperature;
+                          color_temperature = id(ceiling_light).remote_values.get_color_temperature() * (1 - id(update_step));
+                          if(color_temperature > 154.0f)
+                             return color_temperature;
+                          else
+                             return 154;
 
-        # fan mode toggle, cycle winds
-        - if:
-            condition:
-              lambda: "return(x[14] == 4 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
-            then:
+              # for all keycode
               - lambda: "id(frame_counter) = x[4];"
-              - fan.turn_on:
-                  id: yeelight_ceiling_fan
-                  direction: reverse
-              - switch.turn_on: buzzer_beep
-
-        # brightness or color_temperature control(value: 0.01-1f)
-        # color_temperature only support for ceiling light
-        # ceiling brightness -
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 3 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: ceiling_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: ceiling_light
-                  brightness: !lambda |-
-                    float brightness;
-                    brightness = id(ceiling_light).remote_values.get_brightness() - id(update_step);
-                    if( brightness > 0.05f )
-                        return brightness;
-                    else
-                        return 0.05f;
-              - switch.turn_on: buzzer_beep
-
-        # ceiling brightness +
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 5 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: ceiling_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: ceiling_light
-                  brightness: !lambda |-
-                    float brightness;
-                    brightness = id(ceiling_light).remote_values.get_brightness() + id(update_step);
-                    if( brightness < 1.0f )
-                        return brightness;
-                    else
-                        return 1.0f;
-              - switch.turn_on: buzzer_beep
-
-        # night brightness -
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 3 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: night_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: night_light
-                  brightness: !lambda |-
-                    float brightness;
-                    brightness = id(night_light).remote_values.get_brightness() - id(update_step);
-                    if( brightness > 0.05f )
-                        return brightness;
-                    else
-                        return 0.05f;
-              - switch.turn_on: buzzer_beep
-
-        # night brightness +
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 5 && x[16] == 0 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: night_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: night_light
-                  brightness: !lambda |-
-                    float brightness;
-                    brightness = id(night_light).remote_values.get_brightness() + id(update_step);
-                    if( brightness < 1.0f )
-                        return brightness;
-                    else
-                        return 1.0f;
-              - switch.turn_on: buzzer_beep
-
-        # only support by ceiling light, +- update_step
-        # ceiling color_temperature  -
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 3 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: ceiling_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: ceiling_light
-                  color_mode: COLD_WARM_WHITE
-                  color_temperature: !lambda |-
-                    float color_temperature;
-                    color_temperature = id(ceiling_light).remote_values.get_color_temperature() * (1 + id(update_step));
-                    if(color_temperature < 370.0f)
-                      return color_temperature;
-                    else
-                      return 370;
-              - switch.turn_on: buzzer_beep
-
-        # ceiling color_temperature +
-        - if:
-            condition:
-              and:
-                - lambda: "return(x[14] == 5 && x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
-                - light.is_on: ceiling_light
-            then:
-              - lambda: "id(frame_counter) = x[4];"
-              - light.turn_on:
-                  id: ceiling_light
-                  color_mode: COLD_WARM_WHITE
-                  color_temperature: !lambda |-
-                    float color_temperature;
-                    color_temperature = id(ceiling_light).remote_values.get_color_temperature() * (1 - id(update_step));
-                    if(color_temperature > 154.0f)
-                       return color_temperature;
-                    else
-                       return 154;
               - switch.turn_on: buzzer_beep
