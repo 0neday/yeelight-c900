@@ -48,10 +48,6 @@ globals:
   - id: update_step
     type: float
     initial_value: '0.15'
-  - id: fan_speed_loop_flag
-    type: int
-    initial_value: '1'
-    restore_value: true
 
 output:
   - platform: ledc
@@ -148,11 +144,11 @@ esp32_ble_tracker:
       service_uuid: FE95
       then:
         # keycode:
-        # 0 - fan or forward mode set
+        # 0 - fan
         # 1 - ceiling or night
         # 2 - speed minus or three level speed
         # 3 - brightness or color_temperature minus
-        # 4 - speed plus or reverse mode set
+        # 4 - speed plus or fan mode toggle
         # 5 - brightness or color_temperature puls
         # need to check package length == 17 and frame_counter is different
         # long press x[16] = 2; short press x[16] = 0
@@ -217,8 +213,7 @@ esp32_ble_tracker:
                     - light.turn_on:
                         id: ceiling_light
                         brightness: !lambda |-
-                          float brightness;
-                          brightness = id(ceiling_light).remote_values.get_brightness() - id(update_step);
+                          float brightness = id(ceiling_light).remote_values.get_brightness() - id(update_step);
                           if( brightness > 0.05f )
                               return brightness;
                           else
@@ -234,8 +229,7 @@ esp32_ble_tracker:
                     - light.turn_on:
                         id: ceiling_light
                         brightness: !lambda |-
-                          float brightness;
-                          brightness = id(ceiling_light).remote_values.get_brightness() + id(update_step);
+                          float brightness = id(ceiling_light).remote_values.get_brightness() + id(update_step);
                           if( brightness < 1.0f )
                               return brightness;
                           else
@@ -251,8 +245,7 @@ esp32_ble_tracker:
                     - light.turn_on:
                         id: night_light
                         brightness: !lambda |-
-                          float brightness;
-                          brightness = id(night_light).remote_values.get_brightness() - id(update_step);
+                          float brightness = id(night_light).remote_values.get_brightness() - id(update_step);
                           if( brightness > 0.05f )
                               return brightness;
                           else
@@ -268,8 +261,7 @@ esp32_ble_tracker:
                     - light.turn_on:
                         id: night_light
                         brightness: !lambda |-
-                          float brightness;
-                          brightness = id(night_light).remote_values.get_brightness() + id(update_step);
+                          float brightness = id(night_light).remote_values.get_brightness() + id(update_step);
                           if( brightness < 1.0f )
                               return brightness;
                           else
@@ -284,14 +276,13 @@ esp32_ble_tracker:
             condition:
               lambda: "return(x[16] == 2 && x.size() == 17 && id(frame_counter) != x[4]);"
             then:
-              # fan mode toggle, standard winds
+              # it was not realized
               - if:
                   condition:
                     lambda: "return(x[14] == 0);"
                   then:
-                    - fan.turn_on:
-                        id: yeelight_ceiling_fan
-                        direction: forward
+                    - lambda: |-
+                        ESP_LOGI("warnning", "it was not realized");
 
               # toggle night light
               - if:
@@ -300,7 +291,7 @@ esp32_ble_tracker:
                   then:
                     - light.toggle: night_light
 
-              # 1 level = 1%(0x01), 2 level =50%(0x32), 3 level = 100%(0x64)
+              # speed circle
               - if:
                   condition:
                     lambda: "return(x[14] == 2);"
@@ -308,25 +299,26 @@ esp32_ble_tracker:
                     - fan.turn_on:
                         id: yeelight_ceiling_fan
                         speed: !lambda |-
-                          float speed;
-                          speed = id(fan_speed_loop_flag) * 50;
-                          id(fan_speed_loop_flag) += 1;
-                          if(id(fan_speed_loop_flag) > 2){
-                              id(fan_speed_loop_flag) = 0;
-                          }
+                          float speed = id(yeelight_ceiling_fan).speed + 20.0f;
                           if( speed <= 100 && speed >= 1)
                               return speed;
                           else
                               return 1;
 
-              # fan mode toggle, cycle winds
+              # fan mode toggle, standard winds cycle winds
               - if:
                   condition:
                     lambda: "return(x[14] == 4);"
                   then:
                     - fan.turn_on:
                         id: yeelight_ceiling_fan
-                        direction: reverse
+                        direction: !lambda |-
+                          fan::FanDirection direction = id(yeelight_ceiling_fan).direction;
+                          if(direction == fan::FanDirection::REVERSE)
+                            return fan::FanDirection::FORWARD;
+                          else
+                            return fan::FanDirection::REVERSE;
+
 
               # only support by ceiling light, +- update_step
               # ceiling color_temperature  -
